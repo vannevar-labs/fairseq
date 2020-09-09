@@ -11,7 +11,7 @@ import argparse
 import os
 import sys
 
-from fairseq.scoring import bleu
+from fairseq import bleu
 from fairseq.data import dictionary
 
 

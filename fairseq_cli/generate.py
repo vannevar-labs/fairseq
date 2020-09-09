@@ -16,7 +16,7 @@ import numpy as np
 
 import torch
 
-from fairseq import checkpoint_utils, options, scoring, tasks, utils
+from fairseq import bleu, checkpoint_utils, options, tasks, utils
 from fairseq.logging import progress_bar
 from fairseq.logging.meters import StopwatchMeter, TimeMeter
 from fairseq.data import encoders
@@ -38,18 +38,11 @@ def main(args):
         return _main(args, sys.stdout)
 
 
-def get_symbols_to_strip_from_output(generator):
-    if hasattr(generator, 'symbols_to_strip_from_output'):
-        return generator.symbols_to_strip_from_output
-    else:
-        return {generator.eos}
-
-
 def _main(args, output_file):
     logging.basicConfig(
         format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
-        level=os.environ.get('LOGLEVEL', 'INFO').upper(),
+        level=logging.INFO,
         stream=output_file,
     )
     logger = logging.getLogger('fairseq_cli.generate')
@@ -113,7 +106,6 @@ def _main(args, output_file):
         num_shards=args.num_shards,
         shard_id=args.shard_id,
         num_workers=args.num_workers,
-        data_buffer_size=args.data_buffer_size,
     ).next_epoch_itr(shuffle=False)
     progress = progress_bar.progress_bar(
         itr,
@@ -137,8 +129,11 @@ def _main(args, output_file):
             x = tokenizer.decode(x)
         return x
 
-    scorer = scoring.build_scorer(args, tgt_dict)
-
+    # Generate and compute BLEU score
+    if args.sacrebleu:
+        scorer = bleu.SacrebleuScorer()
+    else:
+        scorer = bleu.Scorer(tgt_dict.pad(), tgt_dict.eos(), tgt_dict.unk())
     num_sentences = 0
     has_target = True
     wps_meter = TimeMeter()
@@ -151,12 +146,8 @@ def _main(args, output_file):
         if args.prefix_size > 0:
             prefix_tokens = sample['target'][:, :args.prefix_size]
 
-        constraints = None
-        if "constraints" in sample:
-            constraints = sample["constraints"]
-
         gen_timer.start()
-        hypos = task.inference_step(generator, models, sample, prefix_tokens=prefix_tokens, constraints=constraints)
+        hypos = task.inference_step(generator, models, sample, prefix_tokens)
         num_generated_tokens = sum(len(h[0]['tokens']) for h in hypos)
         gen_timer.stop(num_generated_tokens)
 
@@ -164,11 +155,7 @@ def _main(args, output_file):
             has_target = sample['target'] is not None
 
             # Remove padding
-            if 'src_tokens' in sample['net_input']:
-                src_tokens = utils.strip_pad(sample['net_input']['src_tokens'][i, :], tgt_dict.pad())
-            else:
-                src_tokens = None
-
+            src_tokens = utils.strip_pad(sample['net_input']['src_tokens'][i, :], tgt_dict.pad())
             target_tokens = None
             if has_target:
                 target_tokens = utils.strip_pad(sample['target'][i, :], tgt_dict.pad()).int().cpu()
@@ -187,7 +174,9 @@ def _main(args, output_file):
                         target_tokens,
                         args.remove_bpe,
                         escape_unk=True,
-                        extra_symbols_to_ignore=get_symbols_to_strip_from_output(generator),
+                        extra_symbols_to_ignore={
+                            generator.eos,
+                        }
                     )
 
             src_str = decode_fn(src_str)
@@ -209,7 +198,9 @@ def _main(args, output_file):
                     align_dict=align_dict,
                     tgt_dict=tgt_dict,
                     remove_bpe=args.remove_bpe,
-                    extra_symbols_to_ignore=get_symbols_to_strip_from_output(generator),
+                    extra_symbols_to_ignore={
+                        generator.eos,
+                    }
                 )
                 detok_hypo_str = decode_fn(hypo_str)
                 if not args.quiet:
@@ -261,7 +252,7 @@ def _main(args, output_file):
 
         wps_meter.update(num_generated_tokens)
         progress.log({'wps': round(wps_meter.avg)})
-        num_sentences += sample["nsentences"] if "nsentences" in sample else sample['id'].numel()
+        num_sentences += sample['nsentences']
 
     logger.info('NOTE: hypothesis and token scores are output in base 2')
     logger.info('Translated {} sentences ({} tokens) in {:.1f}s ({:.2f} sentences/s, {:.2f} tokens/s)'.format(
@@ -272,10 +263,7 @@ def _main(args, output_file):
                 logger.warning("BLEU score is being computed by splitting detokenized string on spaces, this is probably not what you want. Use --sacrebleu for standard 13a BLEU tokenization")
             else:
                 logger.warning("If you are using BPE on the target side, the BLEU score is computed on BPE tokens, not on proper words.  Use --sacrebleu for standard 13a BLEU tokenization")
-        # use print to be consistent with other main outputs: S-, H-, T-, D- and so on
-        print(
-            'Generate {} with beam={}: {}'.format(args.gen_subset, args.beam, scorer.result_string()),
-            file=output_file)
+        logger.info('Generate {} with beam={}: {}'.format(args.gen_subset, args.beam, scorer.result_string()))
 
     return scorer
 

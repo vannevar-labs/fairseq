@@ -18,7 +18,6 @@ from typing import Callable, Dict, List, Optional
 import numpy as np
 import torch
 import torch.nn.functional as F
-from fairseq.data import iterators
 from fairseq.logging.meters import safe_round
 from fairseq.modules import gelu, gelu_accurate
 from fairseq.modules.multihead_attention import MultiheadAttention
@@ -34,11 +33,8 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-MANIFOLD_PATH_SEP = "|"
-
-
 def split_paths(paths: str) -> List[str]:
-    return paths.split(os.pathsep) if "://" not in paths else paths.split(MANIFOLD_PATH_SEP)
+    return paths.split(os.pathsep) if "://" not in paths else paths.split("|")
 
 
 def load_ensemble_for_inference(filenames, task, model_arg_overrides=None):
@@ -527,8 +523,8 @@ def get_token_to_word_mapping(tokens, exclude_list):
 
 
 def extract_hard_alignment(attn, src_sent, tgt_sent, pad, eos):
-    tgt_valid = ((tgt_sent != pad) & (tgt_sent != eos)).nonzero(as_tuple=False).squeeze(dim=-1)
-    src_invalid = ((src_sent == pad) | (src_sent == eos)).nonzero(as_tuple=False).squeeze(dim=-1)
+    tgt_valid = ((tgt_sent != pad) & (tgt_sent != eos)).nonzero().squeeze(dim=-1)
+    src_invalid = ((src_sent == pad) | (src_sent == eos)).nonzero().squeeze(dim=-1)
     src_token_to_word = get_token_to_word_mapping(src_sent, [eos, pad])
     tgt_token_to_word = get_token_to_word_mapping(tgt_sent, [eos, pad])
     alignment = []
@@ -559,20 +555,6 @@ def new_arange(x, *size):
 def get_tpu_device(args):
     import torch_xla.core.xla_model as xm
     return xm.xla_device()
-
-
-def tpu_data_loader(itr):
-    import torch_xla.core.xla_model as xm
-    import torch_xla.distributed.parallel_loader as pl
-
-    xm.rendezvous("tpu_data_loader")  # wait for all workers
-    xm.mark_step()
-    device = xm.xla_device()
-    return iterators.CountingIterator(
-        pl.ParallelLoader(itr, [device]).per_device_loader(device),
-        start=getattr(itr, "n", 0),
-        total=len(itr),
-    )
 
 
 class CudaEnvironment(object):

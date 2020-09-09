@@ -138,9 +138,9 @@ class Adafactor(torch.optim.Optimizer):
     def _approx_sq_grad(self, exp_avg_sq_row, exp_avg_sq_col):
         r_factor = (
             exp_avg_sq_row / exp_avg_sq_row.mean(dim=-1, keepdim=True)
-        ).rsqrt_().unsqueeze(-1)
-        c_factor = exp_avg_sq_col.unsqueeze(-2).rsqrt()
-        return torch.mul(r_factor, c_factor)
+        ).rsqrt_()
+        c_factor = exp_avg_sq_col.rsqrt()
+        return torch.mm(r_factor.unsqueeze(-1), c_factor.unsqueeze(0))
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -204,8 +204,8 @@ class Adafactor(torch.optim.Optimizer):
                     exp_avg_sq_row = state['exp_avg_sq_row']
                     exp_avg_sq_col = state['exp_avg_sq_col']
 
-                    exp_avg_sq_row.mul_(beta2t).add_(update.mean(dim=-1), alpha=1.0 - beta2t)
-                    exp_avg_sq_col.mul_(beta2t).add_(update.mean(dim=-2), alpha=1.0 - beta2t)
+                    exp_avg_sq_row.mul_(beta2t).add_(1.0 - beta2t, update.mean(dim=-1))
+                    exp_avg_sq_col.mul_(beta2t).add_(1.0 - beta2t, update.mean(dim=-2))
 
                     # Approximation of exponential moving average of square of gradient
                     update = self._approx_sq_grad(exp_avg_sq_row, exp_avg_sq_col)
@@ -213,7 +213,7 @@ class Adafactor(torch.optim.Optimizer):
                 else:
                     exp_avg_sq = state['exp_avg_sq']
 
-                    exp_avg_sq.mul_(beta2t).add_(update, alpha=1.0 - beta2t)
+                    exp_avg_sq.mul_(beta2t).add_(1.0 - beta2t, update)
                     update = exp_avg_sq.rsqrt().mul_(grad)
 
                 update.div_(
@@ -223,11 +223,11 @@ class Adafactor(torch.optim.Optimizer):
 
                 if use_first_moment:
                     exp_avg = state['exp_avg']
-                    exp_avg.mul_(group['beta1']).add_(update, alpha=1 - group['beta1'])
+                    exp_avg.mul_(group['beta1']).add_(1 - group['beta1'], update)
                     update = exp_avg
 
                 if group['weight_decay'] != 0:
-                    p_data_fp32.add_(p_data_fp32, alpha=-group['weight_decay'] * group['lr'])
+                    p_data_fp32.add_(-group['weight_decay'] * group['lr'], p_data_fp32)
 
                 p_data_fp32.add_(-update)
 

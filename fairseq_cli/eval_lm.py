@@ -25,7 +25,7 @@ from fairseq import distributed_utils
 logging.basicConfig(
     format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
-    level=os.environ.get('LOGLEVEL', 'INFO').upper(),
+    level=logging.INFO,
 )
 logger = logging.getLogger('fairseq_cli.eval_lm')
 
@@ -125,7 +125,6 @@ def main(parsed_args, **unused_kwargs):
         num_shards=args.num_shards,
         shard_id=args.shard_id,
         num_workers=args.num_workers,
-        data_buffer_size=args.data_buffer_size,
     ).next_epoch_itr(shuffle=False)
     progress = progress_bar.progress_bar(
         itr,
@@ -177,7 +176,7 @@ def main(parsed_args, **unused_kwargs):
             tgt_len = tokens.numel()
             pos_scores = hypo['positional_scores'].float()
 
-            if getattr(args, 'add_bos_token', False):
+            if args.add_bos_token:
                 assert hypo['tokens'][0].item() == task.target_dictionary.bos()
                 tokens = tokens[1:]
                 pos_scores = pos_scores[1:]

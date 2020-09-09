@@ -217,10 +217,7 @@ class TestTranslation(unittest.TestCase):
                     dec_ltok_flag = decoder_langtok_flags[j]
                     with tempfile.TemporaryDirectory(f'test_translation_multi_simple_epoch_{i}_{j}') as data_dir:
                         create_dummy_data(data_dir)
-                        preprocess_translation_data(
-                            data_dir,
-                            extra_flags=['--joined-dictionary']
-                        )
+                        preprocess_translation_data(data_dir)
                         train_translation_model(
                             data_dir,
                             arch='transformer',

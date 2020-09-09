@@ -10,21 +10,19 @@ from fairseq import registry
 from fairseq.optim.fairseq_optimizer import FairseqOptimizer
 from fairseq.optim.fp16_optimizer import FP16Optimizer, MemoryEfficientFP16Optimizer
 from fairseq.optim.bmuf import FairseqBMUF  # noqa
-from fairseq.optim.shard import shard_
 
 
 __all__ = [
     'FairseqOptimizer',
     'FP16Optimizer',
     'MemoryEfficientFP16Optimizer',
-    'shard_',
 ]
 
 
 build_optimizer, register_optimizer, OPTIMIZER_REGISTRY = registry.setup_registry(
     '--optimizer',
     base_class=FairseqOptimizer,
-    required=True,
+    default='nag',
 )
 
 

@@ -16,7 +16,7 @@ from fairseq.data import (
     NestedDictionaryDataset,
     NumelDataset,
     NumSamplesDataset,
-    RightPadDataset,
+    PadDataset,
     PrependTokenDataset,
     SortDataset,
     TokenBlockDataset,
@@ -150,15 +150,17 @@ class MaskedLMTask(FairseqTask):
                 {
                     'id': IdDataset(),
                     'net_input': {
-                        'src_tokens': RightPadDataset(
+                        'src_tokens': PadDataset(
                             src_dataset,
                             pad_idx=self.source_dictionary.pad(),
+                            left_pad=False,
                         ),
                         'src_lengths': NumelDataset(src_dataset, reduce=False),
                     },
-                    'target': RightPadDataset(
+                    'target': PadDataset(
                         tgt_dataset,
                         pad_idx=self.source_dictionary.pad(),
+                        left_pad=False,
                     ),
                     'nsentences': NumSamplesDataset(),
                     'ntokens': NumelDataset(src_dataset, reduce=True),
@@ -172,7 +174,7 @@ class MaskedLMTask(FairseqTask):
         )
 
     def build_dataset_for_inference(self, src_tokens, src_lengths, sort=True):
-        src_dataset = RightPadDataset(
+        src_dataset = PadDataset(
             TokenBlockDataset(
                 src_tokens,
                 src_lengths,
@@ -182,6 +184,7 @@ class MaskedLMTask(FairseqTask):
                 break_mode='eos',
             ),
             pad_idx=self.source_dictionary.pad(),
+            left_pad=False,
         )
         src_dataset = PrependTokenDataset(src_dataset, self.source_dictionary.bos())
         src_dataset = NestedDictionaryDataset(

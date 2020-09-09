@@ -214,27 +214,10 @@ class Trainer(object):
         if self.args.use_bmuf:
             self._optimizer = optim.FairseqBMUF(self.args, self._optimizer)
 
-        if self.args.zero_sharding == 'os':
-            if (self.args.fp16
-                    and not self.args.memory_efficient_fp16
-                    and not self.args.memory_efficient_bf16
-            ) and not self.args.fp16_no_flatten_grads:
-                raise ValueError(
-                        "ZeRO is incomptabile with fp16 and flattened grads. "
-                        "Please use --fp16-no-flatten-grads"
-                )
-            else:
-                optim.shard_(self.args, self._optimizer)
-
         # We should initialize the learning rate scheduler immediately after
         # building the optimizer, so that the initial learning rate is set.
         self._lr_scheduler = lr_scheduler.build_lr_scheduler(self.args, self.optimizer)
         self._lr_scheduler.step_update(0)
-
-    def consolidate_optimizer(self):
-        """For OSS, we need to consolidate the state dict."""
-        if hasattr(self.optimizer.optimizer, "consolidate_state_dict"):
-            self.optimizer.optimizer.consolidate_state_dict()
 
     def save_checkpoint(self, filename, extra_state):
         """Save all training state in a checkpoint file."""
@@ -339,7 +322,6 @@ class Trainer(object):
         load_dataset=True,
         data_selector=None,
         shard_batch_itr=True,
-        disable_iterator_cache=False,
     ):
         """Return an EpochBatchIterator over the training set for a given epoch."""
         if load_dataset:
@@ -365,15 +347,12 @@ class Trainer(object):
             num_shards=self.data_parallel_world_size if shard_batch_itr else 1,
             shard_id=self.data_parallel_rank if shard_batch_itr else 0,
             num_workers=self.args.num_workers,
-            epoch=epoch,
-            data_buffer_size=self.args.data_buffer_size,
-            disable_iterator_cache=disable_iterator_cache,
+            epoch=epoch
         )
 
     def get_valid_iterator(
         self,
         subset,
-        disable_iterator_cache=False,
     ):
         """Return an EpochBatchIterator over given validation subset for a given epoch."""
         return self.task.get_batch_iterator(
@@ -389,26 +368,16 @@ class Trainer(object):
             seed=self.args.seed,
             num_shards=self.data_parallel_world_size,
             shard_id=self.data_parallel_rank,
-            num_workers=self.args.num_workers,
-            data_buffer_size=self.args.data_buffer_size,
-            disable_iterator_cache=disable_iterator_cache,
+            num_workers=self.args.num_workers
         )
 
     def begin_epoch(self, epoch):
         """Called at the beginning of each epoch."""
-        logger.info("begin training epoch {}".format(epoch))
-
         if self.quantizer is not None:
             self.quantizer.begin_epoch(epoch)
 
         # task specific setup per epoch
         self.task.begin_epoch(epoch, self.get_model())
-
-        if self.tpu:
-            import torch_xla.core.xla_model as xm
-
-            xm.rendezvous('begin_epoch')  # wait for all workers
-            xm.mark_step()
 
     @metrics.aggregate("train")
     def train_step(self, samples, raise_oom=False):
@@ -515,9 +484,6 @@ class Trainer(object):
             )
             self._cumulative_training_time = total_train_time / self.data_parallel_world_size
 
-        if hasattr(self.model, 'all_reduce'):
-            self.model.all_reduce()
-
         overflow = False
         try:
             if self.tpu and self.data_parallel_world_size > 1:
@@ -615,13 +581,7 @@ class Trainer(object):
                     torch.cuda.empty_cache()
 
         if self.args.fp16:
-            metrics.log_scalar(
-                "loss_scale",
-                self.optimizer.scaler.loss_scale,
-                priority=700,
-                round=4,
-                weight=0,
-            )
+            metrics.log_scalar("loss_scale", self.optimizer.scaler.loss_scale, priority=700, round=0)
 
         metrics.log_stop_time("train_wall")
 
@@ -933,10 +893,7 @@ class Trainer(object):
 
             def is_consistent(tensor):
                 max_abs_diff = torch.max(torch.abs(tensor - tensor[0]))
-                return (
-                    not torch.isfinite(tensor).any()
-                    or (max_abs_diff / (tensor[0] + 1e-6) < 1e-6).all()
-                )
+                return (max_abs_diff / (tensor[0] + 1e-6) < 1e-6).all()
 
             if not is_consistent(self._grad_norm_buf):
                 pretty_detail = "\n".join(

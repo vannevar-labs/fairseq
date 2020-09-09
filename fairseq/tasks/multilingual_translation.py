@@ -221,10 +221,7 @@ class MultilingualTranslationTask(FairseqTask):
             eval_key=None if self.training else "%s-%s" % (self.args.source_lang, self.args.target_lang),
         )
 
-    def build_dataset_for_inference(self, src_tokens, src_lengths, constraints=None):
-        if constraints is not None:
-            raise NotImplementedError("Constrained decoding with the multilingual_translation task is not supported")
-
+    def build_dataset_for_inference(self, src_tokens, src_lengths):
         lang_pair = "%s-%s" % (self.args.source_lang, self.args.target_lang)
         return RoundRobinZipDatasets(
             OrderedDict([(
@@ -315,7 +312,7 @@ class MultilingualTranslationTask(FairseqTask):
                     agg_logging_output[f"{lang_pair}:{k}"] += logging_output[k]
         return agg_loss, agg_sample_size, agg_logging_output
 
-    def inference_step(self, generator, models, sample, prefix_tokens=None, constraints=None):
+    def inference_step(self, generator, models, sample, prefix_tokens=None):
         with torch.no_grad():
             if self.args.decoder_langtok:
                 bos_token = _lang_token_index(self.target_dictionary, self.args.target_lang)
@@ -325,7 +322,6 @@ class MultilingualTranslationTask(FairseqTask):
                 models,
                 sample,
                 prefix_tokens=prefix_tokens,
-                constraints=constraints,
                 bos_token=bos_token,
             )
 

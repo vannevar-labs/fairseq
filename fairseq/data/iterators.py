@@ -19,6 +19,7 @@ from fairseq.data import data_utils
 
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 # Object used by _background_consumer to signal the source is exhausted
 # to the main thread.
@@ -59,10 +60,7 @@ class CountingIterator(object):
     def __iter__(self):
         for x in self.iterable:
             if self.n >= self.total:
-                raise RuntimeError(
-                    'Mismatch between actual and expected iterable length. '
-                    'Please report this to the fairseq developers.'
-                )
+                return
             self.n += 1
             yield x
 
@@ -85,17 +83,8 @@ class CountingIterator(object):
         self.total = min(self.total, n)
 
         # Propagate this change to the underlying iterator
-        # Only take after what we have already consumed (i.e. after restarting
-        # from checkpoint mid epoch, we have to subtract self.n which is the
-        # starting point)
-        #
-        # This to maintain the invariant self.total = self.n + len(iterable),
-        # before calling __next__ or __iter__
-        propagated_take = max(n - self.n, 0)
         if hasattr(self.iterable, "take"):
-            self.iterable.take(propagated_take)
-        else:
-            self.iterable = itertools.islice(self.iterable, propagated_take)
+            self.iterable.take(n)
 
 
 class EpochBatchIterating(object):
@@ -308,16 +297,9 @@ class EpochBatchIterator(EpochBatchIterating):
 
     def state_dict(self):
         """Returns a dictionary containing a whole state of the iterator."""
-        if self.end_of_epoch():
-            epoch = self.epoch + 1
-            iter_in_epoch = 0
-        else:
-            epoch = self.epoch
-            iter_in_epoch = self.iterations_in_epoch
         return {
-            'version': 2,
-            'epoch': epoch,
-            'iterations_in_epoch': iter_in_epoch,
+            'epoch': self.epoch,
+            'iterations_in_epoch': self.iterations_in_epoch,
             'shuffle': self.shuffle,
         }
 
@@ -325,7 +307,6 @@ class EpochBatchIterator(EpochBatchIterating):
         """Copies the state of the iterator from the given *state_dict*."""
         self.epoch = state_dict['epoch']
         itr_pos = state_dict.get('iterations_in_epoch', 0)
-        version = state_dict.get('version', 1)
         if itr_pos > 0:
             # fast-forward epoch iterator
             self._next_epoch_itr = self._get_iterator_for_epoch(
@@ -334,15 +315,8 @@ class EpochBatchIterator(EpochBatchIterating):
                 offset=itr_pos,
             )
             if self._next_epoch_itr is None:
-                if version == 1:
-                    # legacy behavior: we finished the epoch, increment epoch counter
-                    self.epoch += 1
-                else:
-                    raise RuntimeError(
-                        'Cannot resume training due to dataloader mismatch, please '
-                        'report this to the fairseq developers. You can relaunch '
-                        'training with `--reset-dataloader` and it should work.'
-                    )
+                # we finished the epoch, increment epoch counter
+                self.epoch += 1
         else:
             self._next_epoch_itr = None
 
@@ -475,7 +449,9 @@ class BackgroundConsumer(Thread):
 
     def run(self):
         try:
-            for item in self._source:
+            self._source_iter = iter(self._source)
+            for _ in range(len(self._source)):
+                item = next(self._source_iter)
                 self._queue.put(item)
 
                 # Stop if we reached the maximum length
@@ -488,23 +464,24 @@ class BackgroundConsumer(Thread):
         except Exception as e:
             self._queue.put(e)
 
+        del self._source_iter
+
 
 class BufferedIterator(object):
     def __init__(self, size, iterable):
         self._queue = queue.Queue(size)
         self._iterable = iterable
+        self.max_len = None
         self._consumer = None
 
         self.start_time = time.time()
         self.warning_time = None
 
-        self.total = len(iterable)
-
     def _create_consumer(self):
         self._consumer = BackgroundConsumer(
             self._queue,
             self._iterable,
-            self.total,
+            self.max_len
         )
         self._consumer.daemon = True
         self._consumer.start()
@@ -513,16 +490,10 @@ class BufferedIterator(object):
         return self
 
     def __len__(self):
-        return self.total
+        return len(self._iterable)
 
     def take(self, n):
-        self.total = min(self.total, n)
-
-        # Propagate this change to the underlying iterator
-        if hasattr(self._iterable, "take"):
-            self._iterable.take(n)
-        else:
-            self._iterable = itertools.islice(self._iterable, n)
+        self.max_len = n
 
     def __next__(self):
         # Create consumer if not created yet
@@ -533,7 +504,7 @@ class BufferedIterator(object):
         if self._queue.qsize() < min(2, max(1, self._queue.maxsize // 2)):
             if time.time() - self.start_time > 5 * 60:
                 if self.warning_time is None or time.time() - self.warning_time > 15 * 60:
-                    logger.debug(
+                    logger.info(
                         "Data loading buffer is empty or nearly empty. This may "
                         "indicate a data loading bottleneck, and increasing the "
                         "number of workers (--num-workers) may help."

@@ -108,7 +108,7 @@ class SampledMultiEpochDataset(SampledMultiDataset):
 
     def size(self, index):
         if self._epoch_sizes is not None:
-            return self._epoch_sizes.array[index]
+            return self._epoch_sizes[index]
         index = self._map_epoch_index_to_global(index)
         ds_idx, ds_sample_idx = self._get_dataset_and_index(index)
         return self.datasets[ds_idx].size(ds_sample_idx)
@@ -123,7 +123,7 @@ class SampledMultiEpochDataset(SampledMultiDataset):
     @property
     def sizes(self):
         if self._epoch_sizes is not None:
-            return self._epoch_sizes.array
+            return self._epoch_sizes
         start_time = time.time()
 
         size_cache = self._size_cache
@@ -139,13 +139,13 @@ class SampledMultiEpochDataset(SampledMultiDataset):
                 s = (s, s) if not isinstance(s, tuple) else s
                 size_cache[(ds_idx, ds_sample_idx)] = s
                 ret.append(s)
-        self._epoch_sizes = plasma_utils.PlasmaArray(np.array(ret, np.int64))
-        logger.info(f'sizes() calling time: {get_time_gap(start_time, time.time())}')
-        return self._epoch_sizes.array
+        logger.debug(f'sizes() calling time: {get_time_gap(start_time, time.time())}')
+        self._epoch_sizes = np.array(ret, np.int64)
+        return self._epoch_sizes
 
     def ordered_indices(self):
         if self._epoch_ordered_indices is not None:
-            return self._epoch_ordered_indices.array
+            return self._epoch_ordered_indices
 
         if self.batch_by_size:
             # No need to do shuffle as the data items are already randomized
@@ -162,8 +162,8 @@ class SampledMultiEpochDataset(SampledMultiDataset):
             sort_indices = indices[np.argsort(src_sizes[indices], kind='mergesort')]
         else:
             sort_indices = np.arange(len(self))
-        self._epoch_ordered_indices = plasma_utils.PlasmaArray(sort_indices)
-        return self._epoch_ordered_indices.array
+        self._epoch_ordered_indices = sort_indices
+        return sort_indices
 
     def prefetch(self, indices):
         prefetch_indices = [[] for _ in range(len(self.datasets))]
@@ -173,10 +173,6 @@ class SampledMultiEpochDataset(SampledMultiDataset):
             prefetch_indices[ds_idx].append(ds_sample_idx)
         for i in range(len(prefetch_indices)):
             self.datasets[i].prefetch(prefetch_indices[i])
-
-    @property
-    def can_reuse_epoch_itr_across_epochs(self):
-        return False
 
     def set_epoch(self, epoch):
         if self._current_epoch_start_index is None:
@@ -199,7 +195,6 @@ class SampledMultiEpochDataset(SampledMultiDataset):
                epoch,  # epoch index,
            ]
         )
-        del self._random_globa_indices
         self._random_globa_indices = plasma_utils.PlasmaArray(
             rng.choice(self.virtual_size, self.virtual_size, replace=False))
         if self.load_next_shard is None:
@@ -227,19 +222,6 @@ class SampledMultiEpochDataset(SampledMultiDataset):
             ret = ret.numpy()
         return ret
 
-    def _sync_epoch(self, epoch):
-        # in case the ratios are not precisely the same across processes
-        # also to ensure every procresses update the ratios in the same pace
-        epoch = torch.DoubleTensor([epoch])
-        if torch.distributed.is_initialized():
-            if torch.cuda.is_available():
-                distributed_utils.all_reduce(epoch.cuda())
-            else:
-                distributed_utils.all_reduce(epoch)
-            ret = epoch.cpu()
-            ret = ret.numpy()
-        return ret
-
     def _next_virtual_epoch(self, epoch):
         index = self._get_epoch_start_index(epoch)
         if index == 0 or self._random_globa_indices is None:
@@ -252,11 +234,6 @@ class SampledMultiEpochDataset(SampledMultiDataset):
         else:
             self._cur_epoch = epoch
         # reset cache sizes and ordered_indices for the epoch after moving to a new epoch
-
-        self._clean_if_not_none([
-            self._epoch_sizes, self._epoch_ordered_indices, self._size_cache
-        ])
         self._epoch_sizes = None
         self._epoch_ordered_indices = None
         self._current_epoch_start_index = index
-        self._size_cache = {}

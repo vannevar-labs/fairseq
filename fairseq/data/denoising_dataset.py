@@ -18,27 +18,22 @@ def collate(
     left_pad_source=False,
     left_pad_target=False,
     input_feeding=True,
-    pad_to_length=None,
 ):
     assert input_feeding
     if len(samples) == 0:
         return {}
 
-    def merge(key, left_pad, move_eos_to_beginning=False, pad_to_length=None):
+    def merge(key, left_pad, move_eos_to_beginning=False):
         return data_utils.collate_tokens(
             [s[key] for s in samples],
             pad_idx,
             eos_idx=None,  # use eos_idx of each sample instead of vocab.eos()
             left_pad=left_pad,
             move_eos_to_beginning=move_eos_to_beginning,
-            pad_to_length=pad_to_length,
         )
 
     id = torch.LongTensor([s['id'] for s in samples])
-    src_tokens = merge(
-        'source', left_pad=left_pad_source,
-        pad_to_length=pad_to_length['source'] if pad_to_length is not None else None,
-    )
+    src_tokens = merge('source', left_pad=left_pad_source)
     # sort by descending source length
     src_lengths = torch.LongTensor([s['source'].numel() for s in samples])
     src_lengths, sort_order = src_lengths.sort(descending=True)
@@ -48,10 +43,7 @@ def collate(
     prev_output_tokens = None
     target = None
     if samples[0].get('target', None) is not None:
-        target = merge(
-            'target', left_pad=left_pad_target,
-            pad_to_length=pad_to_length['target'] if pad_to_length is not None else None,
-        )
+        target = merge('target', left_pad=left_pad_target)
         target = target.index_select(0, sort_order)
         ntokens = sum(len(s['target']) for s in samples)
 
@@ -62,7 +54,6 @@ def collate(
                 'target',
                 left_pad=left_pad_target,
                 move_eos_to_beginning=True,
-                pad_to_length=pad_to_length['target'] if pad_to_length is not None else None,
             )
             prev_output_tokens = prev_output_tokens.index_select(0, sort_order)
     else:
@@ -77,7 +68,6 @@ def collate(
         },
         'target': target,
         'nsentences': samples[0]['source'].size(0),
-        'sort_order': sort_order,
     }
     if prev_output_tokens is not None:
         batch['net_input']['prev_output_tokens'] = prev_output_tokens
@@ -113,8 +103,7 @@ class DenoisingDataset(FairseqDataset):
         shuffle,
         seed,
         args,
-        eos=None,
-        item_transform_func=None,
+        eos=None
     ):
         self.dataset = dataset
 
@@ -131,7 +120,6 @@ class DenoisingDataset(FairseqDataset):
         self.rotate_ratio = args.rotate
         self.permute_sentence_ratio = args.permute_sentences
         self.eos = (eos if eos is not None else vocab.eos())
-        self.item_transform_func = item_transform_func
 
         if args.bpe != 'gpt2':
             self.full_stop_index = self.vocab.eos()
@@ -140,11 +128,11 @@ class DenoisingDataset(FairseqDataset):
             self.full_stop_index = self.vocab.index('13')
 
         self.replace_length = args.replace_length
-        if self.replace_length not in [-1, 0, 1]:
+        if not self.replace_length in [-1, 0, 1]:
             raise ValueError(f'invalid arg: replace_length={self.replace_length}')
-        if args.mask_length not in ['subword', 'word', 'span-poisson']:
+        if not args.mask_length in ['subword', 'word', 'span-poisson']:
             raise ValueError(f'invalid arg: mask-length={args.mask_length}')
-        if args.mask_length == 'subword' and args.replace_length not in [0, 1]:
+        if args.mask_length == 'subword' and not args.replace_length in [0, 1]:
             raise ValueError(f'if using subwords, use replace-length=1 or 0')
 
         self.mask_span_distribution = None
@@ -166,10 +154,6 @@ class DenoisingDataset(FairseqDataset):
 
         self.epoch = 0
 
-    @property
-    def can_reuse_epoch_itr_across_epochs(self):
-        return True  # only the noise changes, not item sizes
-
     def set_epoch(self, epoch, **unused):
         self.epoch = epoch
 
@@ -190,9 +174,6 @@ class DenoisingDataset(FairseqDataset):
 
             if self.rotate_ratio > 0.0 and np.random.random() < self.rotate_ratio:
                 source = self.add_rolling_noise(source)
-        # there can additional changes to make:
-        if self.item_transform_func is not None:
-            source, target = self.item_transform_func(source, target)
 
         assert (source >= 0).all()
         assert (source[1:-1] >= 1).all()
@@ -214,7 +195,7 @@ class DenoisingDataset(FairseqDataset):
         full_stops[-2] = 1
 
         # Tokens that are full stops, where the previous token is not
-        sentence_ends = (full_stops[1:] * ~full_stops[:-1]).nonzero(as_tuple=False) + 2
+        sentence_ends = (full_stops[1:] * ~full_stops[:-1]).nonzero() + 2
         result = source.clone()
 
         num_sentences = sentence_ends.size(0)
@@ -275,7 +256,7 @@ class DenoisingDataset(FairseqDataset):
         else:
             lengths = torch.ones((num_to_mask,)).long()
         assert is_word_start[-1] == 0
-        word_starts = is_word_start.nonzero(as_tuple=False)
+        word_starts = is_word_start.nonzero()
         indices = word_starts[torch.randperm(word_starts.size(0))[:num_to_mask]].squeeze(1)
         mask_random = torch.FloatTensor(num_to_mask).uniform_() < self.random_ratio
 
@@ -367,16 +348,14 @@ class DenoisingDataset(FairseqDataset):
         assert (result >= 0).all()
         return result
 
-    def collater(self, samples, pad_to_length=None):
+    def collater(self, samples):
         """Merge a list of samples to form a mini-batch.
         Args:
             samples (List[dict]): samples to collate
         Returns:
             dict: a mini-batch of data
         """
-        return collate(
-            samples, self.vocab.pad(), self.eos, self.vocab,
-            pad_to_length=pad_to_length)
+        return collate(samples, self.vocab.pad(), self.eos, self.vocab)
 
     def num_tokens(self, index):
         """Return the number of tokens in a sample. This value is used to

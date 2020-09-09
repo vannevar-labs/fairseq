@@ -12,10 +12,8 @@ from libc.math cimport ceil
 cimport cython
 cimport numpy as np
 
-from libc.stdint cimport int32_t, int64_t
-
 DTYPE = np.int64
-ctypedef int64_t DTYPE_t
+ctypedef np.int64_t DTYPE_t
 
 
 @cython.boundscheck(False)

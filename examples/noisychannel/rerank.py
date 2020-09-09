@@ -8,9 +8,8 @@ from multiprocessing import Pool
 
 import numpy as np
 
-from fairseq import options
+from fairseq import bleu, options
 from fairseq.data import dictionary
-from fairseq.scoring import bleu
 
 from . import (
     rerank_generate,

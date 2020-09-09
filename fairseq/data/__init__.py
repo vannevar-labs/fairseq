@@ -9,7 +9,6 @@ from .fairseq_dataset import FairseqDataset, FairseqIterableDataset
 
 from .base_wrapper_dataset import BaseWrapperDataset
 
-from .add_target_dataset import AddTargetDataset
 from .append_token_dataset import AppendTokenDataset
 from .audio.raw_audio_dataset import FileAudioDataset
 from .backtranslation_dataset import BacktranslationDataset
@@ -49,8 +48,6 @@ from .transform_eos_lang_pair_dataset import TransformEosLangPairDataset
 from .shorten_dataset import TruncateDataset, RandomCropDataset
 from .multilingual.sampled_multi_dataset import SampledMultiDataset
 from .multilingual.sampled_multi_epoch_dataset import SampledMultiEpochDataset
-from .fasta_dataset import FastaDataset, EncodedFastaDataset
-
 from .iterators import (
     CountingIterator,
     EpochBatchIterator,
@@ -59,7 +56,6 @@ from .iterators import (
 )
 
 __all__ = [
-    'AddTargetDataset',
     'AppendTokenDataset',
     'BacktranslationDataset',
     'BaseWrapperDataset',
@@ -70,11 +66,9 @@ __all__ = [
     'CountingIterator',
     'DenoisingDataset',
     'Dictionary',
-    'EncodedFastaDataset',
     'EpochBatchIterator',
     'FairseqDataset',
     'FairseqIterableDataset',
-    'FastaDataset',
     'GroupedIterator',
     'IdDataset',
     'IndexedCachedDataset',

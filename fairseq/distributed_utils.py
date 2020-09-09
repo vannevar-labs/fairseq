@@ -115,7 +115,9 @@ def distributed_init(args):
         xm.rendezvous('distributed_init')  # wait for all workers
         xm.mark_step()
 
-    if not is_master(args):
+    if is_master(args):
+        logging.getLogger().setLevel(logging.INFO)
+    else:
         logging.getLogger().setLevel(logging.WARNING)
 
     if args.model_parallel_size > 1:

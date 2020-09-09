@@ -175,11 +175,9 @@ mkdir -p checkpoints/fconv_wmt_en_de
 fairseq-train \
     data-bin/wmt17_en_de \
     --arch fconv_wmt_en_de \
-    --dropout 0.2 \
+    --lr 0.5 --clip-norm 0.1 --dropout 0.2 --max-tokens 4000 \
     --criterion label_smoothed_cross_entropy --label-smoothing 0.1 \
-    --optimizer nag --clip-norm 0.1 \
-    --lr 0.5 --lr-scheduler fixed --force-anneal 50 \
-    --max-tokens 4000 \
+    --lr-scheduler fixed --force-anneal 50 \
     --save-dir checkpoints/fconv_wmt_en_de
 
 # Evaluate
@@ -207,12 +205,10 @@ fairseq-preprocess \
 mkdir -p checkpoints/fconv_wmt_en_fr
 fairseq-train \
     data-bin/wmt14_en_fr \
-    --arch fconv_wmt_en_fr \
-    --dropout 0.1 \
+    --lr 0.5 --clip-norm 0.1 --dropout 0.1 --max-tokens 3000 \
     --criterion label_smoothed_cross_entropy --label-smoothing 0.1 \
-    --optimizer nag --clip-norm 0.1 \
-    --lr 0.5 --lr-scheduler fixed --force-anneal 50 \
-    --max-tokens 3000 \
+    --lr-scheduler fixed --force-anneal 50 \
+    --arch fconv_wmt_en_fr \
     --save-dir checkpoints/fconv_wmt_en_fr
 
 # Evaluate
